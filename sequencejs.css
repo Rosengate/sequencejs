@@ -33,7 +33,7 @@
 	visibility: visible;
 	background: white;
 	padding: 10px;
-	min-width: 200px;
+	width: 200px;
 	border-radius: 4px;
 	box-shadow: 0px 0px 10px #575757;
 }
@@ -42,6 +42,18 @@
 {
 	padding-top: 5px;
 }
+
+/*#seqjs-tooltip-footer .seqjs-button
+{
+	float: right;
+}
+
+#seqjs-tooltip-footer .seqjs-button-skip, #seqjs-tooltip-footer .seqjs-button-done 
+{
+	float: left;
+}*/
+
+
 
 #seqjs-tooltip-text
 {
@@ -62,6 +74,19 @@
 	border: 1px solid #d4d4d4;
 	font-size: 11px;
 	margin-left: 5px;
+}
+
+.seqjs-button.seqjs-disabled
+{
+	opacity: 0.5;
+	cursor: default;
+	text-decoration: none;
+	color: inherit;
+}
+
+.seqjs-button.seqjs-hide
+{
+	display: none;
 }
 
 .seqjs-button:hover
