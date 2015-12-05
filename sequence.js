@@ -164,13 +164,13 @@ var sequenceJs = function(jQuery)
 			switch(position)
 			{
 				case 'top':
-					this.element().css('top', '-'+height()).css('left', 0);
+					this.element().css('top', '-'+height()+'px').css('left', 0);
 				break;
 				case 'left':
-					this.element().css('top', 0).css('left', '-'+width()).css('left', '-'+width());
+					this.element().css('top', 0).css('left', '-'+width()+'px').css('left', '-'+width()+'px');
 				break;
 				case 'right':
-					this.element().css('top', 0).css('right', '-'+width()).css('right', '-'+width());
+					this.element().css('top', 0).css('right', '-'+width()+'px').css('right', '-'+width()+'px');
 				break;
 				case 'bottom':
 					this.element().css('top', reference.outerHeight()+10).css('left', 0);
