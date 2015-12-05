@@ -17,6 +17,7 @@ var sequenceJs = function(jQuery)
 	var instances = {};
 	var defaultOptions = {};
 	var defaultLabels = {};
+	var defaultButtonRegistry = {};
 
 	/*
 	to-be implemented
@@ -41,10 +42,16 @@ var sequenceJs = function(jQuery)
 		defaultLabels = labels;
 	}
 
+	this.configureButtons = function(registry)
+	{
+		defaultButtonRegistry = registry;
+	}
+
 	this.create = function(name, opts, lbls)
 	{
 		var options = defaultOptions;
 		var labels = defaultLabels;
+		var buttonRegistry = defaultButtonRegistry;
 
 		if(opts)
 			for(var key in opts)
@@ -54,7 +61,7 @@ var sequenceJs = function(jQuery)
 			for(var key in lbls)
 				labels[key] = lbls[key];
 
-		var sequence = new sequenceClass(this, options, labels);
+		var sequence = new sequenceClass(this, options, labels, buttonRegistry);
 		instances[name] = sequence;
 		return sequence;
 	}
@@ -88,6 +95,15 @@ var sequenceJs = function(jQuery)
 		{
 			this.element().show();
 		}
+
+		this.onClick = function(callback)
+		{
+			// onbind any click.
+			this.element().unbind('click');
+
+			this.element().click(callback);
+		}
+
 		this.clear = function()
 		{
 			this.element().hide();
@@ -143,11 +159,12 @@ var sequenceJs = function(jQuery)
 
 			var element = this.element();
 			var width = function(){return element.outerWidth()+10;};
+			var height = function(){return element.outerHeight()+10;};
 
 			switch(position)
 			{
 				case 'top':
-
+					this.element().css('top', '-'+height()).css('left', 0);
 				break;
 				case 'left':
 					this.element().css('top', 0).css('left', '-'+width()).css('left', '-'+width());
@@ -303,6 +320,19 @@ var sequenceJs = function(jQuery)
 		}
 	}(jQuery);
 
+	var util = new function($)
+	{
+		this.shallowCopy = function(obj, destination)
+		{
+			var newObj = destination ? destination : {};
+
+			for(var key in obj)
+				newObj[key] = obj[key];
+
+			return newObj;
+		}
+	}(jQuery);
+
 	/**
 	* A sequence class
 	* Createable through sequenceJs::create
@@ -310,13 +340,14 @@ var sequenceJs = function(jQuery)
 	* @param Object options
 	* @param Object labels
 	*/
-	var sequenceClass = function(manager, options, labels)
+	var sequenceClass = function(manager, options, labels, buttonRegistry)
 	{
 		var $ = manager.$;
 		var steps = [];
 		var currentStepOption = null;
 		var buttons = {};
 		var manager = manager;
+		var isRunning = false;
 		this.labels = {};
 		this.options = {};
 		this.current = 0;
@@ -324,13 +355,15 @@ var sequenceJs = function(jQuery)
 		// initiate full options and labels
 		(function(options, labels)
 		{
+			// default sequence options
 			this.options = {
+				mandatory: false,
 				proceedable: true, // may proceed with next button
 				undoable: true, // may go backward
 				skippable: true,
 				buttonHideOnDisabled: false,
 				scrollToElement: true,
-				exitOnOverlayClick: true,
+				exitOnOverlayClick: false, // if not in a final step, will execute skip, else, will complete.
 				overlayOpacity: 0.5,
 				exitOnEsc: true,
 				disableInteraction: true,
@@ -338,6 +371,7 @@ var sequenceJs = function(jQuery)
 				onSkip: null,
 				onPrevious: null,
 				onNext: null,
+				onOverlayClick: null,
 				callback: null
 			};
 
@@ -374,6 +408,12 @@ var sequenceJs = function(jQuery)
 		this.setLabel = function(key, value)
 		{
 			this.labels[key] = value;
+		}
+
+		this.setLabels = function(labels)
+		{
+			for(var key in labels)
+				this.setLabel(key, labels[key]);
 		}
 
 		this.getLabel = function(key)
@@ -422,57 +462,80 @@ var sequenceJs = function(jQuery)
 		{
 			this.reset();
 			this.current = index;
+			var sequence = this;
 
 			// clone global options 
-			var step = currentStepOption = {};
+			var option = currentStepOption = {};
 			for(var key in this.options)
-				step[key] = this.options[key];
+				option[key] = this.options[key];
 
-			// then merge step to the options
+			// then merge step option to global option
 			for(var key in steps[index])
-				step[key] = steps[index][key];
+				option[key] = steps[index][key];
 
-			// set tooltip text.
-			manager.tooltip.setText(step.text);
+			// @mandatory if an alias for proceedable except on opposite flag. (true mandatory = false proceedable)
+			if(option.mandatory === true)
+				option.proceedable = false;
+
+			// @exitOnOverlayClick
+			if(option.exitOnOverlayClick === true)
+			{
+				manager.overlay.onClick(function()
+				{
+					if(sequence.isDone())
+						sequence.complete();
+					else
+						sequence.skip();
+				});
+			}
+
+			// @text set tooltip text.
+			manager.tooltip.setText(option.text);
 			
 			// tour buttons
 			var buttons = {};
 
-			if(this.isDone())
+			if(!option.buttons || (option.buttons && option.buttons.default === true))
 			{
-				buttons['done'] = this.buttons.create('done');
-			}
-			else // skip
-			{
-				if(step.skippable)
-					buttons['skip'] = this.buttons.create('skip');
-				else
-					buttons['skip'] = this.buttons.create('skip', {disabled: true});
-			}
-
-			if(index > 0 && step.undoable === true)
-				buttons['previous'] = this.buttons.create('previous');
-			else
-				buttons['previous'] = this.buttons.create('previous', {disabled: true});
-
-			if(index < (steps.length - 1) && step.proceedable === true)
-				buttons['next'] = this.buttons.create('next');
-			else
-				buttons['next'] = this.buttons.create('next', {disabled: true});
-
-			// if buttons parameter passed
-			var order = null;
-			if(step.buttons)
-			{
-				if($.isArray(step.buttons))
+				if(this.isDone())
 				{
-					order = step.buttons;
+					buttons['done'] = this.buttons.create('done');
+				}
+				else // skip
+				{
+					// @skippable
+					if(option.skippable)
+						buttons['skip'] = this.buttons.create('skip');
+					else
+						buttons['skip'] = this.buttons.create('skip', {disabled: true});
+				}
+
+				// @undoable
+				if(index > 0 && option.undoable === true)
+					buttons['previous'] = this.buttons.create('previous');
+				else
+					buttons['previous'] = this.buttons.create('previous', {disabled: true});
+
+				// @proceedable
+				if(index < (steps.length - 1) && option.proceedable === true)
+					buttons['next'] = this.buttons.create('next');
+				else
+					buttons['next'] = this.buttons.create('next', {disabled: true});
+			}
+
+			// @buttons custom button
+			var order = null;
+			if(option.buttons)
+			{
+				if($.isArray(option.buttons))
+				{
+					order = option.buttons;
 				}
 				else
 				{
-					for(var name in step.buttons)
+					for(var name in option.buttons)
 					{
-						var buttonOption = step.buttons[name];
+						var buttonOption = option.buttons[name];
 						buttons[name] = this.buttons.create(name, buttonOption);
 					}
 				}
@@ -480,12 +543,13 @@ var sequenceJs = function(jQuery)
 
 			manager.tooltip.setButtons(buttons, order);
 
+			// @element
 			// tooltip positioning
 			// if has element, refer helper to the element, 
 			// and refer the tooltip to the element.
-			if(step.element && $(step.element))
+			if(option.element && $(option.element))
 			{
-				var element = $(step.element);
+				var element = $(option.element);
 				element.addClass('seqjs-relative');
 				manager.helper.referTo(element);
 
@@ -493,32 +557,29 @@ var sequenceJs = function(jQuery)
 				manager.tooltip.referTo(manager.helper.element());
 
 				// position the tooltip
-				if(step.position)
-					manager.tooltip.position(step.position);
+				if(option.position)
+					manager.tooltip.position(option.position);
 				else
 					manager.tooltip.position();
 
 				// equate with jquery object
-				step.element = $(step.element);
+				option.selector = option.element; // save the selector string
+				option.element = $(option.element);
 			}
 			else // only show tooltip on the middle of screen
 			{
 				manager.tooltip.center();
 			}
 
-			if(step.callback)
-				step.callback.call(step, this, step);
+			// @callback to be called on every step execution
+			if(option.callback)
+				option.callback.call(option, this, option);
 
-			// mark this step as invoked
+			// register invoked flag
 			steps[index].invoked = true;
 		}
 
-		this.isDone = function()
-		{
-			return (this.current+1) == steps.length;
-		}
-
-		this.buttons = new function(jQuery, sequence)
+		this.buttons = new function(jQuery, sequence, globalRegistry)
 		{
 			var $ = jQuery;
 			var elements = {};
@@ -530,8 +591,12 @@ var sequenceJs = function(jQuery)
 				registry[name] = options;
 			};
 
-			// construct
-			(function()
+			// register default buttons 
+			// - next
+			// - previous
+			// - skip
+			// - done
+			(function(globalRegistry, localRegistry)
 			{
 				this.register('next', {
 					class: 'seqjs-button-next',
@@ -572,12 +637,33 @@ var sequenceJs = function(jQuery)
 						}
 					}
 				});
-			}).call(this);
+
+				// copy globalRegistry into local
+				for(var name in globalRegistry)
+				{
+					if(!localRegistry[name])
+						localRegistry[name] = {};
+
+					for(var opt in globalRegistry[name])
+					{
+						if(opt == 'event')
+						{
+							for(var ev in globalRegistry[name][opt])
+							{
+								localRegistry[name][ev][opt] = globalRegistry[name][ev][opt];
+							}
+						}
+						else
+						{
+							localRegistry[name][opt] = globalRegistry[name][opt];
+						}
+					}
+				}
+			}).call(this, globalRegistry, registry);
 
 			this.create = function(name, option)
 			{
 				var option = option ? option : {};
-				var label = option.label ? option.label : null;
 				var registryOpt = registry[name];
 
 				// copy unto local option and merge with registered setting
@@ -597,6 +683,7 @@ var sequenceJs = function(jQuery)
 					}
 				}
 
+				var label = option.label ? option.label : null;
 				var button = createButton(name, label);
 
 				if(option.disabled)
@@ -640,7 +727,17 @@ var sequenceJs = function(jQuery)
 
 				return button;
 			}
-		}($, this);
+		}($, this, buttonRegistry);
+
+		this.isDone = function()
+		{
+			return (this.current+1) == steps.length;
+		}
+
+		this.isRunning = function()
+		{
+			return isRunning;
+		}
 
 		this.reset = function()
 		{
@@ -651,32 +748,32 @@ var sequenceJs = function(jQuery)
 
 		this.previous = function()
 		{
-			if(this.options.onPrevious)
-				this.options.onPrevious.call(this, steps[this.current]);
+			if(currentStepOption.onPrevious && currentStepOption.onPrevious.call(this, steps[this.current]) === false)
+				return;
 			
 			this.execute(this.current-1);
 		}
 
 		this.next = function()
 		{
-			if(this.options.onNext)
-				this.options.onNext.call(this, steps[this.current]);
+			if(currentStepOption.onNext && currentStepOption.onNext.call(this, steps[this.current]) === false)
+				return;
 
 			this.execute(this.current+1);
 		}
 
 		this.skip = function()
 		{
-			if(this.options.onSkip)
-				this.options.onSkip.call(this, steps[this.current]);
+			if(currentStepOption.onSkip && currentStepOption.onSkip.call(this, steps[this.current]) === false)
+				return;
 
 			this.end();
 		}
 
 		this.complete = function()
 		{
-			if(this.options.onComplete)
-				this.options.onComplete.call(this, steps[this.current]);
+			if(currentStepOption.onComplete && currentStepOption.onComplete.call(this, steps[this.current]) === false)
+				return;
 
 			this.end();
 		}
@@ -684,12 +781,14 @@ var sequenceJs = function(jQuery)
 		this.end = function()
 		{
 			this.reset();
+			isRunning = false;
 			manager.overlay.clear();
 			manager.elementFactory.clearAllElements();
 		}
 
 		this.start = function()
 		{
+			isRunning = true;
 			manager.elementFactory.createAllElements();
 			this.execute(0);
 			manager.overlay.show();
